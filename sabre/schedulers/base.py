@@ -1,6 +1,6 @@
 """Scheduler base abstract class.
 
-Follows Workdoc Section 3 interface contracts exactly.
+Follows Workdoc Section 3 interface contracts.
 """
 
 from __future__ import annotations
@@ -12,23 +12,23 @@ from sabre.core.process import Process
 class Scheduler:
     """Base class for all discrete-event schedulers."""
 
-    name: str
+    name: str = "base"
 
     def on_arrival(self, p: Process, now: float) -> None:
         """Handle new process arrival."""
-        raise NotImplementedError
+        pass
 
     def on_ready(self, p: Process, now: float) -> None:
         """Handle process entering ready queue after IO or preemption."""
-        raise NotImplementedError
+        pass
 
     def on_slice_end(self, p: Process, ran: float, burst_done: bool, now: float) -> None:
         """Handle completion of a time slice."""
-        raise NotImplementedError
+        pass
 
     def on_exit(self, p: Process, now: float) -> None:
         """Handle process termination."""
-        raise NotImplementedError
+        pass
 
     def pick_next(self, now: float) -> tuple[Process, float] | None:
         """Pick next process to run and quantum length (process, quantum)."""
@@ -36,12 +36,12 @@ class Scheduler:
 
     def overhead_ms(self) -> float:
         """Monitoring cost accrued since last call, then reset."""
-        raise NotImplementedError
+        return 0.0
 
     def flagged(self) -> dict[int, float]:
         """Map pid -> first time level >= 2 (for detection metrics)."""
-        raise NotImplementedError
+        return {}
 
     def decision_log(self) -> list[dict[str, Any]]:
         """Optional explainability log of decisions."""
-        raise NotImplementedError
+        return []
