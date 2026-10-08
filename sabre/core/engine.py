@@ -125,9 +125,10 @@ class Simulator:
                         proc.remaining_burst = next_b
 
                     ran = min(quantum, proc.remaining_burst)
-                    # Schedule SLICE_END event
-                    slice_end_time = self.now + ran
-                    self._push_event(slice_end_time, EventType.SLICE_END, (proc, ran))
+                    # If slice extends past sim_end_ms, cap slice end time to hard stop
+                    slice_end_time = min(self.sim_end_ms, self.now + ran)
+                    actual_ran = slice_end_time - self.now
+                    self._push_event(slice_end_time, EventType.SLICE_END, (proc, actual_ran))
                     continue
 
                 else:
@@ -150,6 +151,11 @@ class Simulator:
                 self.now = event_time
 
             if self.now >= self.sim_end_ms:
+                # If a slice end event was popped at or after sim_end_ms, record CPU ran
+                if event_type == EventType.SLICE_END:
+                    proc, ran = payload
+                    proc.cpu_used += ran
+                    proc.remaining_burst -= ran
                 break
 
             if event_type == EventType.ARRIVAL:
@@ -216,14 +222,18 @@ class Simulator:
                 self.scheduler.on_arrival(child, self.now)
 
         # End of simulation cleanup
-        # Any process not DONE at sim_end gets finish = None
+        sim_final_time = min(self.now, self.sim_end_ms)
+        # Any process not DONE at sim_end gets finish = None, and if in READY, accumulate final wait time
         for p in self.all_processes:
+            if p.state == ProcState.READY:
+                p.wait_time += sim_final_time - p.last_ready_at
             if p.state != ProcState.DONE:
                 p.finish = None
 
         return {
-            "sim_time": min(self.now, self.sim_end_ms),
+            "sim_time": sim_final_time,
             "ctx_switches": self.ctx_switches,
             "overhead_ms": self.total_overhead_ms,
             "processes": self.all_processes,
         }
+

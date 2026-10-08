@@ -10,6 +10,12 @@ Follows Workdoc Section 5.4 and Research Report Section A4:
 - RR_StaticThreshold: RR plus sliding 500ms CPU-share monitor that throttles if share > tau_static
 - CFS_Like: Virtual runtime-based fair share scheduler (Linux CFS analogue)
 - RR_Cgroup: RR plus hard CPU bandwidth cap per process and max-children limit
+
+Note on queue management:
+Simulator engine invokes `on_ready(p, now)` whenever a process becomes ready
+(upon arrival, after IO completion, or upon preemption at slice end).
+Schedulers enqueue in `on_ready(p, now)` and `on_arrival(p, now)`, while
+`on_slice_end` updates internal accounting (e.g. predictor, MLFQ levels, monitors).
 """
 
 from __future__ import annotations
@@ -39,8 +45,7 @@ class FCFS(Scheduler):
         self.queue.append(p)
 
     def on_slice_end(self, p: Process, ran: float, burst_done: bool, now: float) -> None:
-        if not burst_done and p.remaining_burst > 0:
-            self.queue.appendleft(p)
+        pass
 
     def pick_next(self, now: float) -> tuple[Process, float] | None:
         if not self.queue:
@@ -64,18 +69,15 @@ class SJF_Oracle(Scheduler):
         self.ready_list.append(p)
 
     def on_slice_end(self, p: Process, ran: float, burst_done: bool, now: float) -> None:
-        if not burst_done and p.remaining_burst > 0:
-            self.ready_list.insert(0, p)
+        pass
 
     def pick_next(self, now: float) -> tuple[Process, float] | None:
         if not self.ready_list:
             return None
-        # Oracle burst peek: remaining_burst if already set, else query next_cpu_burst
-        # To avoid side-effects if unpeeked, remaining_burst is inspected
+
         def get_oracle_burst(p: Process) -> float:
             if p.remaining_burst > 0:
                 return p.remaining_burst
-            # Inspect first burst in pre-sampled pool if available
             if hasattr(p, "_raw_burst_pool"):
                 pool = getattr(p, "_raw_burst_pool")
                 return pool[0] if pool else 10.0
@@ -112,8 +114,6 @@ class SJF_EMA(Scheduler):
     def on_slice_end(self, p: Process, ran: float, burst_done: bool, now: float) -> None:
         if burst_done:
             self.predictor.update(p.pid, ran)
-        elif p.remaining_burst > 0:
-            self.ready_list.insert(0, p)
 
     def pick_next(self, now: float) -> tuple[Process, float] | None:
         if not self.ready_list:
@@ -148,8 +148,7 @@ class RoundRobin(Scheduler):
         self.queue.append(p)
 
     def on_slice_end(self, p: Process, ran: float, burst_done: bool, now: float) -> None:
-        if not burst_done and p.remaining_burst > 0:
-            self.queue.append(p)
+        pass
 
     def pick_next(self, now: float) -> tuple[Process, float] | None:
         if not self.queue:
@@ -173,7 +172,6 @@ class PriorityScheduler(Scheduler):
 
     def __init__(self, quantum_ms: float = 10.0) -> None:
         self.quantum_ms = float(quantum_ms)
-        # Priority queues 0, 1, 2, 3
         self.queues: list[deque[Process]] = [deque() for _ in range(4)]
 
     def _get_prio(self, p: Process) -> int:
@@ -186,8 +184,7 @@ class PriorityScheduler(Scheduler):
         self.queues[self._get_prio(p)].append(p)
 
     def on_slice_end(self, p: Process, ran: float, burst_done: bool, now: float) -> None:
-        if not burst_done and p.remaining_burst > 0:
-            self.queues[self._get_prio(p)].append(p)
+        pass
 
     def pick_next(self, now: float) -> tuple[Process, float] | None:
         for q in self.queues:
@@ -235,14 +232,9 @@ class MLFQ(Scheduler):
     def on_slice_end(self, p: Process, ran: float, burst_done: bool, now: float) -> None:
         lvl = self.proc_level.get(p.pid, 0)
         if not burst_done and p.remaining_burst > 0:
-            # Demote if used whole quantum
+            # Demote if full quantum used without finishing burst
             if lvl < 2:
-                lvl += 1
-                self.proc_level[p.pid] = lvl
-            self.queues[lvl].append(p)
-        else:
-            # Burst completed: keep current level
-            pass
+                self.proc_level[p.pid] = lvl + 1
 
     def pick_next(self, now: float) -> tuple[Process, float] | None:
         if now - self.last_boost >= self.boost_interval_ms:
@@ -273,7 +265,6 @@ class RR_StaticThreshold(Scheduler):
         self.throttled_quantum_ms = float(throttled_quantum_ms)
 
         self.queue: deque[Process] = deque()
-        # Per-pid slice records: pid -> deque of (timestamp, ran_ms)
         self.slice_history: dict[int, deque[tuple[float, float]]] = {}
         self._flagged: dict[int, float] = {}
 
@@ -305,9 +296,6 @@ class RR_StaticThreshold(Scheduler):
             if p.pid not in self._flagged:
                 self._flagged[p.pid] = now
 
-        if not burst_done and p.remaining_burst > 0:
-            self.queue.append(p)
-
     def pick_next(self, now: float) -> tuple[Process, float] | None:
         if not self.queue:
             return None
@@ -326,17 +314,16 @@ class CFS_Like(Scheduler):
     name = "CFS-like"
 
     WEIGHT_MAP = {
-        "interactive": 1280.0,  # nice -2
-        "bursty": 1024.0,       # nice 0
-        "io_bound": 1024.0,      # nice 0
-        "cpu_bound": 820.0,      # nice +1
+        "interactive": 1280.0,
+        "bursty": 1024.0,
+        "io_bound": 1024.0,
+        "cpu_bound": 820.0,
         "unknown": 1024.0,
     }
 
     def __init__(self, latency_target_ms: float = 10.0, min_granularity_ms: float = 2.0) -> None:
         self.latency_target_ms = float(latency_target_ms)
         self.min_granularity_ms = float(min_granularity_ms)
-        # Min-heap of (vruntime, seq, Process)
         self.heap: list[tuple[float, int, Process]] = []
         self.vruntime: dict[int, float] = {}
         self.min_vruntime: float = 0.0
@@ -346,7 +333,6 @@ class CFS_Like(Scheduler):
         return self.WEIGHT_MAP.get(p.kind, 1024.0)
 
     def on_arrival(self, p: Process, now: float) -> None:
-        # Initial vruntime aligned with current min_vruntime
         self.vruntime[p.pid] = self.min_vruntime
         self.seq += 1
         heapq.heappush(self.heap, (self.min_vruntime, self.seq, p))
@@ -363,16 +349,11 @@ class CFS_Like(Scheduler):
         new_vr = self.vruntime.get(p.pid, self.min_vruntime) + delta_vruntime
         self.vruntime[p.pid] = new_vr
 
-        if not burst_done and p.remaining_burst > 0:
-            self.seq += 1
-            heapq.heappush(self.heap, (new_vr, self.seq, p))
-
     def pick_next(self, now: float) -> tuple[Process, float] | None:
         if not self.heap:
             return None
         vr, _, p = heapq.heappop(self.heap)
         self.min_vruntime = max(self.min_vruntime, vr)
-        # Time slice allocation based on number of runnable processes
         n_runnable = len(self.heap) + 1
         time_slice = max(self.min_granularity_ms, self.latency_target_ms / max(1, n_runnable))
         return p, time_slice
@@ -426,14 +407,10 @@ class RR_Cgroup(Scheduler):
             if p.pid not in self._flagged:
                 self._flagged[p.pid] = now
 
-        if not burst_done and p.remaining_burst > 0:
-            self.queue.append(p)
-
     def pick_next(self, now: float) -> tuple[Process, float] | None:
         self._reset_period_if_needed(now)
         if not self.queue:
             return None
-        # Try to find a process that has not exhausted quota, or fallback work-conserving
         for _ in range(len(self.queue)):
             p = self.queue.popleft()
             used = self.period_used.get(p.pid, 0.0)
@@ -443,7 +420,7 @@ class RR_Cgroup(Scheduler):
                 return p, max(1.0, q)
             self.queue.append(p)
 
-        # Work-conserving: run first available with minimal quantum
+        # Work-conserving fallback: run first available with minimal quantum
         p = self.queue.popleft()
         return p, 2.0
 
