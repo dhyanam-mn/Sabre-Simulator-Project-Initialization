@@ -1,0 +1,37 @@
+{
+  "interactive": {
+    "mu_cpu_share": 0.0092,
+    "sigma_cpu_share": 0.02,
+    "mu_fork_rate": 0.0,
+    "sigma_fork_rate": 0.02,
+    "p99_burst_age": 0.0
+  },
+  "io_bound": {
+    "mu_cpu_share": 0.0329,
+    "sigma_cpu_share": 0.0384,
+    "mu_fork_rate": 0.0,
+    "sigma_fork_rate": 0.02,
+    "p99_burst_age": 20.0
+  },
+  "cpu_bound": {
+    "mu_cpu_share": 0.0681,
+    "sigma_cpu_share": 0.1087,
+    "mu_fork_rate": 0.0,
+    "sigma_fork_rate": 0.02,
+    "p99_burst_age": 280.0
+  },
+  "bursty": {
+    "mu_cpu_share": 0.0425,
+    "sigma_cpu_share": 0.0474,
+    "mu_fork_rate": 0.0,
+    "sigma_fork_rate": 0.02,
+    "p99_burst_age": 170.0
+  },
+  "unknown": {
+    "mu_cpu_share": 0.3,
+    "sigma_cpu_share": 0.2,
+    "mu_fork_rate": 0.0,
+    "sigma_fork_rate": 0.1,
+    "p99_burst_age": 400.0
+  }
+}
