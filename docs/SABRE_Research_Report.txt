@@ -1,0 +1,341 @@
+==========================================================================================
+SABRE: PROJECT REPORT, GAP REVIEW AND RESEARCH UPGRADE PLAN
+Security- And Behaviour-aware, Risk-Elastic CPU Scheduler (VIT Vellore)
+Prepared for: Dhyanam Mahajan (Role C) | Team: Khushi (A), Aadya (B) | Date: 08 Oct 2026
+Based on: SABRE_Implementation_Workdoc.md + SABRE_Explanation_and_Steps.md
+==========================================================================================
+
+Tags used below:  [MUST] needed for a credible paper   [SHOULD] strong upgrade   [STRETCH] only if ahead
+
+------------------------------------------------------------------------------------------
+1. WHAT WE ARE DOING (one paragraph)
+------------------------------------------------------------------------------------------
+We build a deterministic Python simulator of a CPU, run FCFS / SJF / RR / Priority / MLFQ /
+RR+StaticThreshold and our SABRE scheduler on identical fake workloads, inject three attacks
+(fork bomb, CPU hog, low-and-slow) plus an adaptive attacker, and measure performance, detection
+and collateral damage. SABRE = predicted burst + behaviour class + class-conditional risk score
+-> queue, quantum, share cap. Containment is graduated (levels 0-3), reversible, never starving
+and work-conserving. Output: 9-10 experiments, plots, statistics, and a paper.
+
+Verdict: the plan is solid and already better than most student projects (novelty list N1-N7,
+30 seeds, paired tests, ablation, charged overhead). To make it a RESEARCH project it needs:
+a threat model, a few formal guarantees, stronger baselines, real-data validation, robustness
+tests and a reproducibility package. Also 8 concrete flaws in the spec must be fixed first.
+
+------------------------------------------------------------------------------------------
+2. FLAWS / RISKS FOUND IN THE CURRENT SPEC (fix before coding)
+------------------------------------------------------------------------------------------
+F1 [MUST] A hog can look like a legitimate CPU-bound process.
+   Class-conditional risk judges a process against its own class. A hog is classified
+   cpu_bound (share ~0.9+, no IO), and the spec says a benign cpu_bound at 0.9 share must stay
+   level 0. So z_cpu ~ 0 and the hog may never be flagged. What separates them is burst length:
+   benign cpu_bound bursts are lognormal (mean 150 ms), the hog's burst never ends.
+   FIX: add features `burst_age_ms` (CPU run since last IO/burst end) and `slices_since_io`;
+   calibrate per-class mu/sigma (or p99) for them; add signal s_age = clip((age - p99_class)/
+   scale,0,1) into the noisy-OR. Update Features dataclass NOW (before interfaces freeze).
+   Write this as an explicit "identifiability" paragraph in the paper: what is and is not
+   separable from scheduler-visible data.
+
+F2 [MUST] Calibration circularity.
+   Baselines mu/sigma are learned under RR but applied while SABRE changes quanta (shares
+   differ). FIX: calibrate under SABRE with use_risk=false (same scheduler, risk off); report
+   RR-calibrated vs SABRE-calibrated as a sensitivity result.
+
+F3 [MUST] Fork-bomb children inflate detection metrics.
+   label=1 for up to 2000 forkchildren means process-level recall/precision measure mostly the
+   children. FIX: report BOTH process-level and attack-instance-level (a tree counts as
+   detected when root or any descendant reaches level>=2; TTD = first flag in tree minus attack
+   start). Primary security metric = instance-level.
+
+F4 [MUST] LSI / ADI definitions are inconsistent and can divide by zero.
+   LSI uses a different scheduler (RR no-attack) as baseline; ADI uses the same scheduler.
+   FIX: define two clear pairs per scheduler X:
+     AttackSlowdown(X) = metric(X, attack) / metric(X, no attack)      (what the attack costs)
+     AbsoluteCost(X)   = metric(X, no attack) / metric(RR, no attack)  (what the scheduler costs)
+   Keep LSI (benign cpu_bound turnaround) but also LSI_all (all benign classes). Guard zero or
+   tiny denominators (add epsilon, report n/a).
+
+F5 [MUST] Time-to-detect is censored.
+   Undetected attackers have no TTD. Median over detected-only is biased. FIX: report detection
+   rate plus Kaplan-Meier style curve (time vs fraction detected), censor at sim end.
+
+F6 [MUST] Statistics: multiple comparisons.
+   9+ experiments x many metrics x 7 baselines will give false positives. FIX: pre-declare
+   primary metrics (ADI, LSI, recall at FPR<=5%, TTD), apply Holm-Bonferroni to the primary
+   family, mark everything else exploratory. Add bootstrap CIs next to t-CIs (bursty data).
+
+F7 [SHOULD] Guaranteed-share parameters overlap and are not formally reconciled.
+   min_share=2%, slot_period=10 (about 10% of dispatches), cap[3]=0.10. FIX: derive one
+   formula for the guaranteed lower bound and the cap upper bound, write it in docs, and
+   encode it as property tests (see A2).
+
+F8 [SHOULD] Baselines are weak.
+   Only a static CPU-share threshold. A reviewer will ask "why not Linux CFS, cgroup cpu.max /
+   pids.max, or a learned anomaly detector?" (see A4).
+
+------------------------------------------------------------------------------------------
+3. ADDITIONS THAT MAKE IT A RESEARCH PROJECT
+------------------------------------------------------------------------------------------
+A1 [MUST] Formal threat model (new doc: docs/THREAT_MODEL.md, 1 page -> paper Section III)
+   - Attacker goals: (a) denial of service to interactive users, (b) resource theft (mining),
+     (c) stealth (stay undetected). Attacker knowledge: black-box (sees only own latency/CPU).
+   - Capabilities: unprivileged process, can fork, can duty-cycle, can mimic an IO pattern,
+     can adapt every 500 ms. Cannot: modify scheduler, kernel exploits, side channels.
+   - Out of scope (state honestly): memory/IO/network exhaustion, multi-tenant covert channels,
+     privileged attackers.
+   - Defender goals: bounded harm to benign work, bounded false-positive cost, no starvation.
+
+A2 [MUST for a,b / SHOULD for c-e] Formal guarantees + property-based tests
+   (a) Starvation-freedom: any contained process receives >= m fraction of CPU over any window
+       W while others are runnable. Give the bound as a function of slot_period and quantum.
+   (b) Work-conservation: CPU idle only if no runnable process.
+   (c) Bounded harm: extra delay the contained set can impose on any benign process <= f(caps).
+   (d) CUSUM: approximate average run length (false-alarm rate) under Gaussian benign share and
+       detection delay for a drift of size delta; compare analytic vs simulated.
+   (e) Hysteresis: max level changes per window under bounded noise.
+   Implement (a)(b)(e) as `hypothesis` property tests (random workloads, assertions hold).
+
+A3 [SHOULD] Attacker game / stronger N6
+   Add a learned attacker (epsilon-greedy bandit or small Q-learning over duty levels 0.1..1.0,
+   reward = CPU obtained minus penalty when throttled). Define attacker utility = useful CPU
+   gained. Show the long-run attacker utility under each scheduler (SABRE should cap it).
+   Also add a MIMICRY attacker (cpu miner padded with fake short IO waits to pose as bursty)
+   and report the attacker's throughput cost of evading.
+
+A4 [MUST] Stronger baselines (put into E1)
+   - CFS-like scheduler (virtual runtime, weighted fair share) as the "what Linux does" reference
+   - RR + cgroup-style limits: hard cpu cap per process + max-children limit (pids.max analogue)
+   - RR + learned anomaly detector on the SAME features (IsolationForest, logistic regression
+     trained on labelled calibration runs as an upper bound). scikit-learn allowed ONLY in
+     experiments/baselines; change Master Prompt rule 1 accordingly.
+   - MLFQ with periodic priority boost.
+
+A5 [MUST] Detection-quality curves
+   ROC and PR curves by sweeping risk thresholds; report AUC and recall at FPR = 1% and 5%.
+   Compare SABRE risk score vs static threshold vs learned detector on the same data.
+
+A6 [MUST] Real-data validation (promote E10 from optional)
+   Use a public workload trace (Parallel Workloads Archive SWF, or a cluster trace) for benign
+   processes; inject the same attacks. Report whether conclusions hold. Optional small
+   real-machine check: psutil advisory mode inside a VM/sandbox only, print recommended nice
+   values, never enforce.
+
+A7 [MUST] Robustness and distribution shift (new experiment E11)
+   - Calibrate on lognormal workload, test on heavy-tailed (Pareto) bursts and a different
+     arrival rate and class mix.
+   - Inject classifier noise: 10% / 20% of processes misclassified.
+   - Inject feature measurement noise (+-10-30%) and delayed feedback (stale features).
+   - Report degradation curves. A method that fails gracefully is a stronger paper.
+
+A8 [SHOULD] Sensitivity analysis done properly
+   One-at-a-time tornado chart plus global screening (Morris or Sobol) over ~10 parameters
+   (lambda, gamma, thresholds, caps, alpha, q_base, weights). Tune on tuning seeds only.
+
+A9 [SHOULD] Explainability evaluation (N7)
+   Check decision-log reason codes against ground truth (does `LVL2_CUSUM` appear for the
+   lowslow attacker, `LINEAGE` for fork children?). Report reason-code accuracy and include one
+   annotated log excerpt. This turns "decision log" into a measurable contribution.
+
+A10 [SHOULD] Cost-model realism
+   Overhead costs (0.02 ms etc.) are assumptions. Micro-benchmark the real Python/NumPy update
+   to get an order of magnitude, or cite published eBPF/monitoring overheads; keep E8 as the
+   safety net (break-even point).
+
+A11 [MUST] Reproducibility package
+   - Seed manifest file: tuning seeds 100-119, calibration 200-219, evaluation 0-29 (disjoint,
+     committed).
+   - Config hash + git commit hash written into every results CSV row.
+   - `make reproduce` (or `python -m sabre.experiments.run_all`) regenerates every table/figure.
+   - Dockerfile, GitHub Actions CI, tagged release, Zenodo DOI for the artifact.
+
+A12 [MUST] Related-work matrix and positioning
+   Table: columns = prediction / classification / risk scoring / drift detection / lineage /
+   reversible containment / overhead charged; rows = papers (Linux CFS, MLFQ literature,
+   fork-bomb defences like process limits, cryptojacking detectors, anomaly-detection
+   schedulers, ML-based schedulers, CUSUM in intrusion detection). SABRE should be the only row
+   with all ticks. Source real citations yourselves; do not accept AI-invented references.
+   Verify every reference exists.
+
+A13 [MUST] Limitations section written early
+   Simulator not kernel; single core (unless E13); synthetic attacks; assumed cost model;
+   cannot see memory/IO attacks. Reviewers reward honesty.
+
+A14 [STRETCH] Multi-core (E13): 2 and 4 cores, global queue; fork bomb and miner behave
+   differently. Promote to SHOULD if time allows (it is the first thing a reviewer asks).
+
+------------------------------------------------------------------------------------------
+4. REVISED EXPERIMENT LIST
+------------------------------------------------------------------------------------------
+E1  Overall comparison: FCFS, SJF-oracle, SJF-EMA, RR, Priority, MLFQ(+boost), RR+StaticThr,
+    CFS-like, RR+cgroup-limits, RR+learned-detector vs SABRE      (extended with A4)
+E2  Attack intensity (fork rate x0.5..4, hogs 1..8)
+E3  Stealth sweep + drift variant (recall, KM detection curves)
+E4  Malicious fraction 0..30%
+E5  False-positive stress (benign-heavy, no attackers)             (N1 evidence)
+E6  Adaptive + learned + mimicry attackers; attacker utility        (N6, A3)
+E7  Ablation (every flag) + burst_age signal on/off                 (F1 evidence)
+E8  Overhead sensitivity and break-even
+E9  Pareto: ADI vs LSI over threshold/cap grid
+E10 Real trace benign workload + same attacks                      (now MUST)
+E11 Robustness: distribution shift, classifier noise, feature noise (NEW, MUST)
+E12 Detection curves: ROC/PR/AUC, recall at FPR 1% and 5%           (NEW, MUST)
+E13 Multi-core 2/4 cores                                            (NEW, STRETCH)
+
+------------------------------------------------------------------------------------------
+5. REVISED HYPOTHESES (pre-register before touching test seeds)
+------------------------------------------------------------------------------------------
+Commit docs/PREREGISTRATION.md BEFORE running evaluation seeds. The git timestamp is the proof.
+Each hypothesis gets: metric, comparison, test, threshold, correction.
+
+H1  SABRE ADI (interactive p95 slowdown) lower than RR, RR+StaticThr, CFS-like. Paired
+    Wilcoxon, Holm-corrected, effect size Cliff's delta >= 0.33.
+H2  SABRE recall for lowslow stealth 0.9-1.0 > static threshold (CUSUM effect), TTD reported
+    with censoring.
+H3  FPR <= 5% and LSI within 10% of RR on benign-heavy preset (E5).
+H4  Overhead break-even exists and is reported (E8).
+H5  Adaptive/learned attacker's long-run utility lower under SABRE than static baseline.
+H6  (new) Burst-age signal is necessary to detect hogs (E7: removing it drops hog recall).
+H7  (new) Under 20% classifier noise, instance-level recall drops by less than 15 points.
+Report every outcome, including failures. The paper's claim is the TRADE-OFF, not "always wins".
+
+------------------------------------------------------------------------------------------
+6. PAPER PLAN (IEEE-style, 6-8 pages)
+------------------------------------------------------------------------------------------
+I Intro + 3 contributions | II Related work (matrix A12) | III Threat model (A1)
+IV SABRE design (N1-N4, quantum rule, ladder) | V Guarantees (A2) | VI Methodology
+(simulator, workloads, attacks, baselines, metrics LSI/ADI, seed protocol) | VII Results
+(E1-E12, stats with CI, tornado, Pareto, timeline "money figure") | VIII Limitations / ethics
+IX Conclusion | Artifact link (GitHub + Zenodo DOI).
+Contribution claim map: N1->E5, N2->E3, N3->E2, N4->guarantees+E4, N5->E9, N6->E6, N7->A9.
+
+------------------------------------------------------------------------------------------
+7. HOW WE EXECUTE: GEMINI PRO IN ANTIGRAVITY + GITHUB, SIDE BY SIDE
+------------------------------------------------------------------------------------------
+7.1 One-time setup (Dhyanam does this, then invites teammates)
+   mkdir sabre && cd sabre && git init -b main
+   mkdir docs
+   # copy into docs/: SABRE_Implementation_Workdoc.md, SABRE_Explanation_and_Steps.md,
+   #                  SABRE_Research_Report.txt (this file)
+   # create on github.com a PRIVATE repo named sabre (no README), then:
+   git remote add origin https://github.com/<your-username>/sabre.git
+   git add . && git commit -m "docs: add spec, plan and research report"
+   git push -u origin main
+   # (or, if GitHub CLI is installed: gh repo create sabre --private --source=. --push)
+   Then: repo Settings -> Collaborators -> add Khushi and Aadya; Settings -> Branches ->
+   require pull request + passing CI before merge to main. Make repo public at submission.
+
+7.2 Open the folder in Antigravity
+   - File -> Open Folder -> sabre. Docs are inside the workspace, so the agent can read them;
+     prompts below just point to file paths instead of pasting 30 KB.
+   - Paste the Master Prompt (Workdoc Section 0) once as the first message / workspace rule.
+     Edit rule 1 to allow scikit-learn and hypothesis in tests/baselines only.
+   - Use the planning/agent mode for whole modules, fast mode for small fixes.
+
+7.3 Loop for EVERY module (do not skip steps)
+   1. git checkout -b feat/<module>
+   2. Give Gemini the module prompt (below). It writes code AND tests.
+   3. YOU run `pytest -q` in the terminal. Never trust "tests pass" without seeing output.
+   4. Read the diff. Check: interfaces unchanged, no hard-coded numbers (all in YAML), seed
+      used via numpy Generator, overhead charged.
+   5. git add -A && git commit -m "feat(<module>): ..." && git push -u origin feat/<module>
+   6. Open PR on GitHub; merge when CI is green. Teammates pull main.
+   7. If it breaks: paste the exact traceback and say "fix without changing the interface".
+   Commit after every working module, never after a long untested session.
+
+7.4 Interface freeze first (Step 0 of the plan)
+   Do this BEFORE anyone codes. Also apply fix F1 (add burst_age_ms, slices_since_io to
+   Features) and F3/F4 metric definitions to the spec now, so Khushi and Aadya build against
+   the corrected contract.
+
+7.5 GitHub Actions CI file (.github/workflows/ci.yml)
+   name: ci
+   on: [push, pull_request]
+   jobs:
+     test:
+       runs-on: ubuntu-latest
+       strategy: {matrix: {python-version: ["3.10", "3.12"]}}
+       steps:
+         - uses: actions/checkout@v4
+         - uses: actions/setup-python@v5
+           with: {python-version: "${{ matrix.python-version }}"}
+         - run: pip install numpy pandas scipy matplotlib pytest pyyaml hypothesis scikit-learn
+         - run: pytest -q
+
+7.6 Ready-to-paste Antigravity prompts
+
+--- PROMPT 0: scaffold + frozen interfaces (run first) ---
+Read docs/SABRE_Implementation_Workdoc.md Sections 0, 2, 3, 11 and docs/SABRE_Research_Report.txt
+Sections 2 and 3 (A4 baselines list). Create the repository skeleton exactly as in Section 2:
+package dirs with __init__.py, configs/default.yaml from Section 11, interface-only files
+(dataclasses / abstract classes with the exact signatures from Section 3; bodies raise
+NotImplementedError): core/process.py, schedulers/base.py, intel/features.py, predictor.py,
+classifier.py, risk.py. Add to Features the fields burst_age_ms: float and slices_since_io: int.
+Add sabre/config.py (YAML loader), pyproject.toml, requirements.txt, .gitignore (results/,
+__pycache__, .venv), LICENSE (MIT), README stub, tests/test_smoke.py that imports every module,
+and .github/workflows/ci.yml running pytest -q on Python 3.10 and 3.12. Do not implement any
+logic. Run pytest -q and show me the output.
+
+--- PROMPT 1: Module C1 (your core module) ---
+Implement Module C1 from docs/SABRE_Implementation_Workdoc.md Section 7: schedulers/controller.py
+and schedulers/sabre.py with tests. intel/* and core/* have only interface stubs; write minimal
+test doubles in tests/ if needed. Include feature flags (7.5), decision_log reason codes, aging,
+guaranteed Q3 slot, elastic caps, interactive preempt gap. Add hypothesis property tests for:
+(a) contained process never below min share while others are busy, (b) work conservation,
+(c) hysteresis bounds level flapping. Keep all numbers in configs/default.yaml.
+
+--- PROMPT 2: Module C2 (experiments) ---
+Implement Module C2 (Section 8) plus the extras in docs/SABRE_Research_Report.txt Sections 2-4:
+experiments/run_experiment.py, stats.py (t and bootstrap CIs, paired Wilcoxon, Cliff's delta,
+Holm-Bonferroni), plots.py. Write config hash and git commit hash into every CSV row. Seeds
+must come from a committed seed manifest with disjoint tuning/calibration/evaluation ranges.
+
+--- PROMPT 3: bug template ---
+Here is the exact error: <paste traceback>. Fix it without changing any class names, fields or
+method signatures from Section 3. Add a regression test.
+
+--- PROMPT 4: review before merge ---
+Review the diff of this branch against docs/SABRE_Implementation_Workdoc.md: list any
+interface drift, hard-coded constants, non-deterministic randomness, uncharged overhead, or
+missing tests. Do not change code, only report.
+
+------------------------------------------------------------------------------------------
+8. REVISED TIMELINE (MUST items only fit in 8 weeks; SHOULD items need week 9-10 or cuts)
+------------------------------------------------------------------------------------------
+Week 0   Setup, GitHub, CI, interface freeze with F1/F3/F4 fixes, THREAT_MODEL.md,
+         seed manifest, related-work reading started.
+Week 1   Khushi engine+FCFS/RR | Aadya features+EMA (incl. burst_age) | Dhyanam config, CI,
+         metrics skeleton, stats.py (CI/Wilcoxon/Holm) with tests.
+Week 2   Workloads + SJF/Priority/MLFQ | classifier | SABRE v0 (no risk).
+Week 3   Attacks | RiskScorer v0 + calibrate (under SABRE-risk-off) | integrate, first run.
+Week 4   Adaptive attacker, CFS-like, cgroup-limit baseline | CUSUM, lineage, burst_age signal |
+         ladder, hysteresis, caps + property tests (A2 a,b,e).
+Week 5   Metrics (instance-level, KM, LSI/ADI v2) | learned-detector baseline, ROC code |
+         runner, preregistration committed.
+Week 6   Tune on tuning seeds | E1-E9 on evaluation seeds | E10 real trace loader.
+Week 7   E11 robustness, E12 curves, sensitivity | plots, timeline figure | freeze code.
+Week 8   Paper, limitations, artifact (Docker, Zenodo), demo, rehearsal.
+Cut order if late: E13 -> mimicry/learned attacker -> Sobol (keep tornado) -> cost
+micro-benchmark. Never cut: threat model, guarantees (a)(b), E5, E10, E11, preregistration.
+
+------------------------------------------------------------------------------------------
+9. TOP RISKS AND MITIGATIONS
+------------------------------------------------------------------------------------------
+R1 Hog not detected (F1)            -> burst_age signal, E7 evidence
+R2 SABRE worse than RR without attack -> tune before proceeding (acceptance criterion 2)
+R3 Teammates' code drifts from interfaces -> frozen interface commit, PR review prompt 4, CI
+R4 AI-invented references           -> verify every citation manually
+R5 Tuning on test seeds             -> disjoint seed manifest, preregistration
+R6 Reviewers: "only simulation"     -> E10 real traces, limitations, optional psutil advisory
+R7 Time                             -> cut order in Section 8
+
+------------------------------------------------------------------------------------------
+10. DEFINITION OF DONE
+------------------------------------------------------------------------------------------
+[ ] pytest -q green in CI, property tests included
+[ ] Every result reproducible with one command from a tagged release
+[ ] Threat model, preregistration, seed manifest committed
+[ ] E1-E12 CSVs + figures + stats table (Holm-corrected)
+[ ] Related-work matrix with verified references
+[ ] Limitations section written
+[ ] Paper + 5-minute demo (timeline figure + decision log)
+==========================================================================================
