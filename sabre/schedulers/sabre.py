@@ -11,11 +11,12 @@ Follows Workdoc Section 7.4, 7.5, Section 3, and Research Report additions:
 from __future__ import annotations
 
 from typing import Any
+import numpy as np
 
 from sabre.core.process import Process
 from sabre.schedulers.base import Scheduler
 from sabre.schedulers.controller import SabreController, ControllerDecision
-from sabre.intel.features import FeatureExtractor
+from sabre.intel.features import FeatureExtractor, Features
 from sabre.intel.predictor import BurstPredictor
 from sabre.intel.classifier import BehaviourClassifier
 from sabre.intel.risk import RiskScorer, DEFAULT_BASELINES
@@ -31,6 +32,7 @@ DEFAULT_FLAGS = {
     "use_trust": True,
     "use_elastic_cap": True,
     "use_aging": True,
+    "use_burst_age": True,
 }
 
 
@@ -95,7 +97,12 @@ class SabreScheduler(Scheduler):
             trust_cap=risk_cfg.get("trust_cap", 0.5) if self.flags["use_trust"] else 0.0,
             update_spacing_ms=feat_cfg.get("update_spacing_ms", 50.0),
             cost_risk_ms=costs_cfg.get("risk", 0.02),
+            use_burst_age=self.flags.get("use_burst_age", True),
         )
+
+        self.classifier_noise_rate = float(cfg.get("classifier_noise_rate", 0.0))
+        self.feature_noise_rate = float(cfg.get("feature_noise_rate", 0.0))
+        self.noise_rng = np.random.Generator(np.random.PCG64(int(cfg.get("seed", 42))))
 
         # 5. Controller
         self.controller = SabreController(
@@ -170,13 +177,33 @@ class SabreScheduler(Scheduler):
 
         # Update classifier
         if self.flags["use_classifier"]:
-            self.proc_class[p.pid] = self.classifier.classify(f, pid=p.pid)
+            pred_cls = self.classifier.classify(f, pid=p.pid)
+            if self.classifier_noise_rate > 0.0 and self.noise_rng.random() < self.classifier_noise_rate:
+                other_classes = [c for c in ["interactive", "io_bound", "cpu_bound", "bursty"] if c != pred_cls]
+                pred_cls = str(self.noise_rng.choice(other_classes))
+            self.proc_class[p.pid] = pred_cls
         else:
             self.proc_class[p.pid] = "unknown"
 
+        # Apply feature noise if configured
+        f_risk = f
+        if self.feature_noise_rate > 0.0:
+            jitter = float(self.noise_rng.normal(0.0, self.feature_noise_rate))
+            f_risk = Features(
+                cpu_share=float(np.clip(f.cpu_share * (1.0 + jitter), 0.0, 1.0)),
+                fork_rate=float(max(0.0, f.fork_rate * (1.0 + jitter))),
+                n_descendants=f.n_descendants,
+                mean_burst=f.mean_burst,
+                cv_burst=f.cv_burst,
+                io_ratio=f.io_ratio,
+                full_quantum_frac=f.full_quantum_frac,
+                burst_age_ms=float(max(0.0, f.burst_age_ms * (1.0 + jitter))),
+                slices_since_io=f.slices_since_io,
+            )
+
         # Update risk
         if self.flags["use_risk"]:
-            self.risk_scorer.update(p.pid, f, self.proc_class[p.pid], now)
+            self.risk_scorer.update(p.pid, f_risk, self.proc_class[p.pid], now)
             lvl = self.risk_scorer.level(p.pid)
             self.proc_level[p.pid] = lvl
             self.proc_reasons[p.pid] = self.risk_scorer.reasons(p.pid)

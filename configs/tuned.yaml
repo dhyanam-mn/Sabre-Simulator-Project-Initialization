@@ -1,0 +1,79 @@
+sim:
+  sim_end_ms: 60000
+  ctx_switch_ms: 0.05
+  n_benign: 60
+  arrival_rate_per_s: 4
+attack:
+  start_ms: 5000
+  malicious_fraction: 0.1
+  forkbomb_rate: 50
+  max_descendants: 2000
+  static_threshold: 0.6
+  static_window_ms: 500
+  stealth: 0.9
+features:
+  W: 8
+  T_share_ms: 500
+  update_spacing_ms: 50
+predictor:
+  type: ema
+  alpha: 0.5
+  priors:
+    interactive: 2
+    io_bound: 8
+    cpu_bound: 150
+    bursty: 10
+risk:
+  Z_max: 4
+  weights:
+  - 0.9
+  - 0.7
+  - 0.8
+  lambda: 0.97
+  gamma: 0.9
+  D_max: 30
+  cusum_k_sigma: 0.5
+  cusum_h_sigma: 5
+  level_thresholds:
+  - 0.3
+  - 0.55
+  - 0.8
+  up_hold: 2
+  down_hold: 3
+  down_margin: 0.1
+  trust_gain: 0.01
+  trust_cap: 0.5
+sabre:
+  q_base: 10
+  q_min: 1
+  q_max: 40
+  short_thr: 5
+  long_thr: 50
+  pred_ref: 10
+  age_ms: 200
+  slot_period: 8
+  caps:
+  - 1.0
+  - 0.5
+  - 0.25
+  - 0.1
+  cap_window_ms: 200
+  min_share: 0.02
+  preempt_gap_ms: 2
+  level_factor:
+  - 1.0
+  - 0.75
+  - 0.5
+  - 0.25
+rr:
+  quantum_ms: 10
+costs:
+  feature: 0.02
+  ema: 0.01
+  online: 0.1
+  classify: 0.01
+  risk: 0.02
+  decision: 0.01
+experiments:
+  seeds: 30
+  calib_seeds: 20

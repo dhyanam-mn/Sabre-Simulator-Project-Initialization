@@ -106,6 +106,7 @@ class RiskScorer:
         trust_cap: float = 0.50,
         update_spacing_ms: float = 50.0,
         cost_risk_ms: float = 0.02,
+        use_burst_age: bool = True,
     ) -> None:
         self.baselines = baselines if baselines is not None else DEFAULT_BASELINES
         self.Z_max = float(Z_max)
@@ -113,6 +114,7 @@ class RiskScorer:
         self.weights = list(weights) if weights is not None else [0.90, 0.70, 0.80]
         self.weight_age = float(weight_age)
         self.scale_age = float(scale_age)
+        self.use_burst_age = bool(use_burst_age)
         self.decay_lambda = float(decay_lambda)
         self.lineage_gamma = float(lineage_gamma)
         self.D_max = int(D_max)
@@ -191,7 +193,10 @@ class RiskScorer:
         s_drift = float(np.clip(st.cusum_s / max(1e-4, h), 0.0, 1.0))
 
         # 3. Burst age signal (F1): separates hog from benign cpu_bound
-        s_age = float(np.clip((f.burst_age_ms - p99_age) / self.scale_age, 0.0, 1.0))
+        if self.use_burst_age:
+            s_age = float(np.clip((f.burst_age_ms - p99_age) / self.scale_age, 0.0, 1.0))
+        else:
+            s_age = 0.0
 
         # Reasons tracking
         reasons: list[str] = []
