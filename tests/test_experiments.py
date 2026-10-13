@@ -166,3 +166,46 @@ def test_holm_bonferroni():
     assert adj_p[0] == pytest.approx(0.03)  # 0.01 * 3
     assert sig[0] is True
     assert sig[1] is False
+
+
+def test_sabre_flags_hog_detected():
+    """Verify that a hog run under SABRE reaches level >= 2, is recorded in flagged(),
+
+    and compute_security_metrics counts it as detected (recall == 1.0).
+    """
+    from sabre.core.attacks import create_hog
+    from sabre.schedulers.sabre import SabreScheduler
+    from sabre.core.engine import Simulator
+
+    hog = create_hog(pid=501, arrival=100.0)
+    sched = SabreScheduler()
+    sim = Simulator(sched, [hog], sim_end_ms=10000.0, seed=42)
+    sim.run()
+
+    flagged = sched.flagged()
+    assert 501 in flagged
+    assert flagged[501] >= 100.0
+
+    sec = compute_security_metrics(sim.all_processes, flagged, attack_start_ms=100.0, sim_end_ms=10000.0)
+    assert sec["recall"] == 1.0
+    assert sec["instance_recall"] == 1.0
+    assert sec["fpr"] == 0.0
+
+
+def test_adi_metric_under_attack():
+    """Verify that ADI >= 1.0 when an attack hurts interactive response latency."""
+    # Under attack, interactive 95th percentile response is degraded
+    sched_no_attack = {"resp_p95": 20.0, "avg_wait": 100.0}
+    sched_attack = {"resp_p95": 40.0, "avg_wait": 250.0}
+    rr_no_attack = {"resp_p95": 25.0, "avg_wait": 110.0}
+
+    comp = compute_comparative_metrics(
+        sched_attack_metrics=sched_attack,
+        sched_no_attack_metrics=sched_no_attack,
+        rr_no_attack_metrics=rr_no_attack,
+        sched_attack_procs=[],
+        rr_no_attack_procs=[],
+    )
+    assert comp["adi"] >= 1.0
+    assert pytest.approx(comp["adi"], rel=1e-3) == 2.0
+

@@ -236,10 +236,11 @@ class RiskScorer:
             st.reasons.append("LINEAGE")
 
         # 7. Trust discount
-        if st.raw_risk < 0.20:
+        if st.raw_risk < 0.20 and inst < 0.20:
             st.trust = min(self.trust_cap, st.trust + self.trust_gain)
         else:
-            st.trust = max(0.0, st.trust - self.trust_gain)
+            # Immediate forfeit of trust upon suspicious burst/activity
+            st.trust = 0.0
 
         st.final_risk = float(np.clip(st.eff_risk * (1.0 - st.trust), 0.0, 1.0))
 

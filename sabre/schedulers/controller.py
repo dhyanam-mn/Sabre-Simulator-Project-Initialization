@@ -251,8 +251,15 @@ class SabreController:
                 q_list = self.queues[q_name]
                 if not q_list:
                     continue
-                # If predictor is active, sort by predicted burst (approximate SJF); otherwise FIFO
-                if self.use_predictor:
+                # If aging is active and any process has waited >= age_ms, pick the oldest starving process
+                starving_indices = [
+                    i for i, p in enumerate(q_list)
+                    if self.use_aging and (now - p.last_ready_at >= self.age_ms)
+                ]
+                if starving_indices:
+                    # Pick process waiting the longest
+                    best_idx = max(starving_indices, key=lambda i: now - q_list[i].last_ready_at)
+                elif self.use_predictor:
                     best_idx = 0
                     best_pred = pred_map.get(q_list[0].pid, 10.0)
                     for i in range(1, len(q_list)):

@@ -27,13 +27,13 @@ risk:
   Z_max: 4
   weights:
   - 0.9
-  - 0.7
-  - 0.8
+  - 0.75
+  - 0.85
   lambda: 0.97
   gamma: 0.9
-  D_max: 30
-  cusum_k_sigma: 0.5
-  cusum_h_sigma: 5
+  D_max: 12
+  cusum_k_sigma: 0.8
+  cusum_h_sigma: 10.0
   level_thresholds:
   - 0.3
   - 0.55
@@ -42,7 +42,7 @@ risk:
   down_hold: 3
   down_margin: 0.1
   trust_gain: 0.01
-  trust_cap: 0.5
+  trust_cap: 0.2
 sabre:
   q_base: 10
   q_min: 1
@@ -51,7 +51,7 @@ sabre:
   long_thr: 50
   pred_ref: 10
   age_ms: 200
-  slot_period: 8
+  slot_period: 10
   caps:
   - 1.0
   - 0.5

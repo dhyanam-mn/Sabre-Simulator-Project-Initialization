@@ -67,6 +67,7 @@ def evaluate_candidate(
         sched_benign = SabreScheduler(config=config)
         sim_benign = Simulator(sched_benign, p_benign, sim_end_ms=sim_end_ms, ctx_switch_ms=ctx_ms, seed=seed)
         res_benign = sim_benign.run()
+        perf_benign = compute_performance_metrics(res_benign["processes"], res_benign, sim_end_ms=sim_end_ms)
         sec_benign = compute_security_metrics(
             res_benign["processes"],
             sched_benign.flagged(),
@@ -95,7 +96,7 @@ def evaluate_candidate(
         )
         comp = compute_comparative_metrics(
             perf_att,
-            perf_rr,
+            perf_benign,
             perf_rr,
             res_att["processes"],
             res_rr["processes"],
@@ -129,18 +130,17 @@ def tune_parameters(
     candidate_thresholds = [
         [0.30, 0.55, 0.80],  # Default
         [0.25, 0.50, 0.75],
-        [0.35, 0.60, 0.85],
     ]
     candidate_weights = [
         [0.90, 0.70, 0.80],  # Default: fork, cpu, drift
         [0.90, 0.75, 0.85],
-        [0.85, 0.70, 0.80],
     ]
     candidate_caps = [
         [1.0, 0.50, 0.25, 0.10],  # Default
-        [1.0, 0.55, 0.30, 0.12],  # Slightly looser containment
     ]
     candidate_slot_periods = [10, 8]
+    candidate_d_max = [12, 15]
+    candidate_cusum_h = [8.0, 10.0]
 
     best_score = float("inf")
     best_cfg = copy.deepcopy(base_cfg)
@@ -152,15 +152,21 @@ def tune_parameters(
         for w in candidate_weights:
             for caps in candidate_caps:
                 for sp in candidate_slot_periods:
-                    trial += 1
-                    cfg_cand = copy.deepcopy(base_cfg)
-                    cfg_cand["risk"]["level_thresholds"] = th
-                    cfg_cand["risk"]["weights"] = w
-                    cfg_cand["sabre"]["caps"] = caps
-                    cfg_cand["sabre"]["slot_period"] = sp
+                    for d_max in candidate_d_max:
+                        for c_h in candidate_cusum_h:
+                            trial += 1
+                            cfg_cand = copy.deepcopy(base_cfg)
+                            cfg_cand["risk"]["level_thresholds"] = th
+                            cfg_cand["risk"]["weights"] = w
+                            cfg_cand["sabre"]["caps"] = caps
+                            cfg_cand["sabre"]["slot_period"] = sp
+                            cfg_cand["risk"]["D_max"] = d_max
+                            cfg_cand["risk"]["cusum_h_sigma"] = c_h
+                            cfg_cand["risk"]["cusum_k_sigma"] = 0.8
+                            cfg_cand["risk"]["trust_cap"] = 0.20
 
-                    # Evaluate over tuning seeds
-                    metrics = evaluate_candidate(cfg_cand, tuning_seeds[:5], sim_end_ms=25000.0)
+                            # Evaluate over tuning seeds
+                            metrics = evaluate_candidate(cfg_cand, tuning_seeds[:5], sim_end_ms=25000.0)
 
                     # Multi-objective optimization:
                     # Penalize FPR > 0.05 heavily; minimize ADI, LSI, and wait time; maximize recall

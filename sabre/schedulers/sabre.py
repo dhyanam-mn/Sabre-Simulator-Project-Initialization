@@ -10,6 +10,8 @@ Follows Workdoc Section 7.4, 7.5, Section 3, and Research Report additions:
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 import numpy as np
 
@@ -79,6 +81,15 @@ class SabreScheduler(Scheduler):
             cost_ms=costs_cfg.get("classify", 0.01),
         )
 
+        if baselines is None:
+            baselines_file = Path(__file__).resolve().parent.parent.parent / "configs" / "baselines.json"
+            if baselines_file.exists():
+                try:
+                    with baselines_file.open("r", encoding="utf-8") as f:
+                        baselines = json.load(f)
+                except Exception:
+                    baselines = None
+
         # 4. Risk scorer
         self.risk_scorer = RiskScorer(
             baselines=baselines,
@@ -136,10 +147,20 @@ class SabreScheduler(Scheduler):
     def on_arrival(self, p: Process, now: float) -> None:
         """Handle process arrival or fork spawn."""
         self.features.register_process(p.pid, p.ppid)
-        if p.ppid is not None and self.flags["use_lineage"]:
-            self.risk_scorer.inherit(p.pid, p.ppid)
+        if p.ppid is not None:
             if self.features.records.get(p.ppid):
                 self.features.on_spawn(p.ppid, None, 1, now)
+                # Immediately evaluate parent's fork activity to update parent's risk
+                if self.flags["use_risk"]:
+                    f_parent = self.features.extract(p.ppid, now)
+                    self.risk_scorer.update(p.ppid, f_parent, self.proc_class.get(p.ppid, "unknown"), now)
+                    p_lvl = self.risk_scorer.level(p.ppid)
+                    self.proc_level[p.ppid] = p_lvl
+                    self.proc_reasons[p.ppid] = self.risk_scorer.reasons(p.ppid)
+                    if p_lvl >= 2 and p.ppid not in self._flagged:
+                        self._flagged[p.ppid] = now
+            if self.flags["use_lineage"]:
+                self.risk_scorer.inherit(p.pid, p.ppid)
 
         self.predictor.init_process(p.pid, p.kind)
         self.proc_pred[p.pid] = self.predictor.predict(p.pid)

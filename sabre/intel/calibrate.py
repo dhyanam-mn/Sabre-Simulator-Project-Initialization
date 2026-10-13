@@ -100,21 +100,26 @@ def calibrate(
 
         p99_age = float(np.percentile(ages, 99.0)) if len(ages) >= 10 else float(np.max(ages))
 
+        # Ensure safety margins on p99 burst age and cpu_share variance (Workdoc 6.4-6.5)
+        # to prevent single benign processes running uncontended from triggering CUSUM or burst-age alarms
+        safe_p99_age = max(p99_age * 1.5, 450.0 if cls == "cpu_bound" else (300.0 if cls == "bursty" else 30.0))
+        safe_sigma_cpu = max(sigma_cpu, 0.20 if cls in ("cpu_bound", "bursty") else 0.05)
+
         baselines[cls] = {
             "mu_cpu_share": round(mu_cpu, 4),
-            "sigma_cpu_share": round(sigma_cpu, 4),
+            "sigma_cpu_share": round(safe_sigma_cpu, 4),
             "mu_fork_rate": round(mu_fork, 4),
-            "sigma_fork_rate": round(sigma_fork, 4),
-            "p99_burst_age": round(p99_age, 2),
+            "sigma_fork_rate": round(max(sigma_fork, 0.05), 4),
+            "p99_burst_age": round(safe_p99_age, 2),
         }
 
     # Unknown fallback
     baselines["unknown"] = {
         "mu_cpu_share": 0.30,
-        "sigma_cpu_share": 0.20,
+        "sigma_cpu_share": 0.25,
         "mu_fork_rate": 0.0,
         "sigma_fork_rate": 0.10,
-        "p99_burst_age": 400.0,
+        "p99_burst_age": 250.0,
     }
 
     out_file = Path(output_path) if output_path is not None else BASELINES_PATH
