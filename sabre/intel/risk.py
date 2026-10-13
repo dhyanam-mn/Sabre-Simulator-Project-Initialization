@@ -44,25 +44,25 @@ DEFAULT_BASELINES: dict[str, dict[str, float]] = {
         "p99_burst_age": 30.0,
     },
     "cpu_bound": {
-        "mu_cpu_share": 0.90,
-        "sigma_cpu_share": 0.10,
+        "mu_cpu_share": 0.95,
+        "sigma_cpu_share": 0.15,
         "mu_fork_rate": 0.0,
         "sigma_fork_rate": 0.1,
         "p99_burst_age": 500.0,
     },
     "bursty": {
-        "mu_cpu_share": 0.35,
-        "sigma_cpu_share": 0.20,
-        "mu_fork_rate": 0.0,
-        "sigma_fork_rate": 0.1,
-        "p99_burst_age": 350.0,
-    },
-    "unknown": {
-        "mu_cpu_share": 0.30,
+        "mu_cpu_share": 0.75,
         "sigma_cpu_share": 0.25,
         "mu_fork_rate": 0.0,
         "sigma_fork_rate": 0.1,
         "p99_burst_age": 400.0,
+    },
+    "unknown": {
+        "mu_cpu_share": 0.85,
+        "sigma_cpu_share": 0.20,
+        "mu_fork_rate": 0.0,
+        "sigma_fork_rate": 0.1,
+        "p99_burst_age": 500.0,
     },
 }
 

@@ -36,10 +36,12 @@ def load_tuning_seeds(seeds_file: str | Path = "configs/seeds.yaml") -> list[int
 def evaluate_candidate(
     config: dict[str, Any],
     tuning_seeds: list[int],
-    sim_end_ms: float = 30000.0,
+    sim_end_ms: float | None = None,
 ) -> dict[str, float]:
     """Evaluate a candidate configuration over tuning seeds."""
     sim_cfg = config.get("sim", {})
+    if sim_end_ms is None:
+        sim_end_ms = float(sim_cfg.get("sim_end_ms", 90000.0))
     ctx_ms = float(sim_cfg.get("ctx_switch_ms", 0.05))
     n_benign = int(sim_cfg.get("n_benign", 60))
     arr_rate = float(sim_cfg.get("arrival_rate_per_s", 4.0))
@@ -166,7 +168,7 @@ def tune_parameters(
                             cfg_cand["risk"]["trust_cap"] = 0.20
 
                             # Evaluate over tuning seeds
-                            metrics = evaluate_candidate(cfg_cand, tuning_seeds[:5], sim_end_ms=25000.0)
+                            metrics = evaluate_candidate(cfg_cand, tuning_seeds[:5], sim_end_ms=60000.0)
 
                     # Multi-objective optimization:
                     # Penalize FPR > 0.05 heavily; minimize ADI, LSI, and wait time; maximize recall
@@ -186,7 +188,7 @@ def tune_parameters(
 
     # Validate best candidate on all 20 tuning seeds
     print("\nValidating chosen configuration on all 20 tuning seeds (100-119)...")
-    full_metrics = evaluate_candidate(best_cfg, tuning_seeds, sim_end_ms=30000.0)
+    full_metrics = evaluate_candidate(best_cfg, tuning_seeds, sim_end_ms=float(best_cfg.get("sim", {}).get("sim_end_ms", 90000.0)))
     print(
         f"Validation on tuning seeds (100-119): "
         f"ADI={full_metrics['mean_adi']:.2f}, LSI={full_metrics['mean_lsi']:.2f}, "

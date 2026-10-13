@@ -108,6 +108,8 @@ class SabreScheduler(Scheduler):
             trust_cap=risk_cfg.get("trust_cap", 0.5) if self.flags["use_trust"] else 0.0,
             update_spacing_ms=feat_cfg.get("update_spacing_ms", 50.0),
             cost_risk_ms=costs_cfg.get("risk", 0.02),
+            weight_age=risk_cfg.get("weight_age", 0.90),
+            scale_age=risk_cfg.get("scale_age", 200.0),
             use_burst_age=self.flags.get("use_burst_age", True),
         )
 

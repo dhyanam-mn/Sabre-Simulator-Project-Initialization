@@ -100,14 +100,25 @@ def calibrate(
 
         p99_age = float(np.percentile(ages, 99.0)) if len(ages) >= 10 else float(np.max(ages))
 
-        # Ensure safety margins on p99 burst age and cpu_share variance (Workdoc 6.4-6.5)
-        # to prevent single benign processes running uncontended from triggering CUSUM or burst-age alarms
-        safe_p99_age = max(p99_age * 1.5, 450.0 if cls == "cpu_bound" else (300.0 if cls == "bursty" else 30.0))
-        safe_sigma_cpu = max(sigma_cpu, 0.20 if cls in ("cpu_bound", "bursty") else 0.05)
+        # Ensure safety margins on p99 burst age and cpu_share baseline (Workdoc 6.4-6.5 and Research Report F1)
+        # to reflect that CPU-bound and bursty workloads legitimately consume high CPU shares when active,
+        # separating attackers primarily via sustained burst age (s_age) and excessive unconstrained rate.
+        if cls == "cpu_bound":
+            calib_mu = max(0.95, mu_cpu)
+            calib_sigma = max(0.15, sigma_cpu)
+            safe_p99_age = max(p99_age * 1.5, 500.0)
+        elif cls == "bursty":
+            calib_mu = max(0.75, mu_cpu)
+            calib_sigma = max(0.25, sigma_cpu)
+            safe_p99_age = max(p99_age * 1.5, 400.0)
+        else:
+            calib_mu = mu_cpu
+            calib_sigma = max(0.05, sigma_cpu)
+            safe_p99_age = max(p99_age * 1.5, 30.0)
 
         baselines[cls] = {
-            "mu_cpu_share": round(mu_cpu, 4),
-            "sigma_cpu_share": round(safe_sigma_cpu, 4),
+            "mu_cpu_share": round(calib_mu, 4),
+            "sigma_cpu_share": round(calib_sigma, 4),
             "mu_fork_rate": round(mu_fork, 4),
             "sigma_fork_rate": round(max(sigma_fork, 0.05), 4),
             "p99_burst_age": round(safe_p99_age, 2),
@@ -115,11 +126,11 @@ def calibrate(
 
     # Unknown fallback
     baselines["unknown"] = {
-        "mu_cpu_share": 0.30,
-        "sigma_cpu_share": 0.25,
+        "mu_cpu_share": 0.85,
+        "sigma_cpu_share": 0.20,
         "mu_fork_rate": 0.0,
         "sigma_fork_rate": 0.10,
-        "p99_burst_age": 250.0,
+        "p99_burst_age": 500.0,
     }
 
     out_file = Path(output_path) if output_path is not None else BASELINES_PATH

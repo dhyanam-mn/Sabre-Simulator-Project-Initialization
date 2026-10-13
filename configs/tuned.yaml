@@ -1,8 +1,13 @@
 sim:
-  sim_end_ms: 60000
+  sim_end_ms: 90000
   ctx_switch_ms: 0.05
-  n_benign: 60
-  arrival_rate_per_s: 4
+  n_benign: 35
+  arrival_rate_per_s: 0.45
+scenarios:
+  overload:
+    sim_end_ms: 60000
+    n_benign: 60
+    arrival_rate_per_s: 4.0
 attack:
   start_ms: 5000
   malicious_fraction: 0.1
@@ -27,11 +32,11 @@ risk:
   Z_max: 4
   weights:
   - 0.9
-  - 0.75
-  - 0.85
+  - 0.7
+  - 0.8
   lambda: 0.97
   gamma: 0.9
-  D_max: 12
+  D_max: 15
   cusum_k_sigma: 0.8
   cusum_h_sigma: 10.0
   level_thresholds:
@@ -43,6 +48,9 @@ risk:
   down_margin: 0.1
   trust_gain: 0.01
   trust_cap: 0.2
+  weight_age: 0.9
+  scale_age: 200.0
+  unknown_p99_burst_age: 500.0
 sabre:
   q_base: 10
   q_min: 1
