@@ -125,6 +125,9 @@ def make_scheduler(name: str, config: dict[str, Any], **kwargs: Any) -> Schedule
         return CFS_Like()
     elif name == "RR+cgroup-limits":
         return RR_Cgroup(quantum_ms=rr_q)
+    elif name == "RR+LearnedDetector":
+        from sabre.schedulers.baselines import RR_LearnedDetector
+        return RR_LearnedDetector(quantum_ms=rr_q, window_ms=window)
     elif name == "SABRE":
         return SabreScheduler(config=config, **kwargs)
     else:
@@ -160,6 +163,7 @@ SCHEDULERS_E1 = [
     "RR+StaticThreshold",
     "CFS-like",
     "RR+cgroup-limits",
+    "RR+LearnedDetector",
     "SABRE",
 ]
 

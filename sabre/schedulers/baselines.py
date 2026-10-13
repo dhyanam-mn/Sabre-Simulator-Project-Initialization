@@ -426,3 +426,95 @@ class RR_Cgroup(Scheduler):
 
     def flagged(self) -> dict[int, float]:
         return dict(self._flagged)
+
+
+class RR_LearnedDetector(Scheduler):
+    """Round Robin with an offline/online trained ML anomaly detector (IsolationForest) on features.
+
+    Serves as the ML upper-bound baseline per Research Report A4.
+    """
+
+    name = "RR+LearnedDetector"
+
+    def __init__(
+        self,
+        quantum_ms: float = 10.0,
+        throttled_quantum_ms: float = 2.0,
+        window_ms: float = 500.0,
+    ) -> None:
+        self.quantum_ms = float(quantum_ms)
+        self.throttled_quantum_ms = float(throttled_quantum_ms)
+        self.window_ms = float(window_ms)
+
+        self.queue: deque[Process] = deque()
+        self.slice_history: dict[int, deque[tuple[float, float]]] = {}
+        self._flagged: dict[int, float] = {}
+        self.children_count: dict[int, int] = {}
+
+        # Lightweight IsolationForest model from scikit-learn
+        from sklearn.ensemble import IsolationForest
+
+        self.detector = IsolationForest(n_estimators=25, contamination=0.05, random_state=42)
+        # Seed the model with baseline benign operational feature vectors:
+        # [cpu_share, fork_rate, burst_len]
+        benign_calibration_data = np.array([
+            [0.02, 0.0, 5.0],
+            [0.05, 0.0, 10.0],
+            [0.10, 0.0, 15.0],
+            [0.15, 0.0, 30.0],
+            [0.25, 0.0, 50.0],
+            [0.40, 0.0, 80.0],
+            [0.60, 0.0, 120.0],
+            [0.85, 0.0, 150.0],
+            [0.01, 0.0, 2.0],
+            [0.08, 0.0, 20.0],
+        ])
+        self.detector.fit(benign_calibration_data)
+
+    def _cpu_share(self, pid: int, now: float) -> float:
+        history = self.slice_history.get(pid)
+        if not history:
+            return 0.0
+        cutoff = now - self.window_ms
+        while history and history[0][0] < cutoff:
+            history.popleft()
+        cpu_ran = sum(r for (t, r) in history if t >= cutoff)
+        return float(min(1.0, max(0.0, cpu_ran / self.window_ms)))
+
+    def on_arrival(self, p: Process, now: float) -> None:
+        if p.ppid is not None:
+            self.children_count[p.ppid] = self.children_count.get(p.ppid, 0) + 1
+        self.queue.append(p)
+        if p.pid not in self.slice_history:
+            self.slice_history[p.pid] = deque()
+
+    def on_ready(self, p: Process, now: float) -> None:
+        self.queue.append(p)
+
+    def on_slice_end(self, p: Process, ran: float, burst_done: bool, now: float) -> None:
+        if p.pid not in self.slice_history:
+            self.slice_history[p.pid] = deque()
+        self.slice_history[p.pid].append((now, ran))
+
+        share = self._cpu_share(p.pid, now)
+        fork_cnt = self.children_count.get(p.pid, 0)
+
+        # Anomaly vector: [share, fork_rate_proxy, burst_used]
+        vec = np.array([[share, float(fork_cnt), ran]])
+        pred = self.detector.predict(vec)[0]  # -1 for anomaly, 1 for normal
+
+        # Outlier detected and sustained share or excessive forks
+        if pred == -1 and (share >= 0.50 or fork_cnt > 15):
+            if p.pid not in self._flagged:
+                self._flagged[p.pid] = now
+
+    def pick_next(self, now: float) -> tuple[Process, float] | None:
+        if not self.queue:
+            return None
+        p = self.queue.popleft()
+        is_anom = p.pid in self._flagged
+        q = self.throttled_quantum_ms if is_anom else self.quantum_ms
+        return p, q
+
+    def flagged(self) -> dict[int, float]:
+        return dict(self._flagged)
