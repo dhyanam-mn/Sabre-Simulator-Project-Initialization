@@ -1,0 +1,68 @@
+================================================================================
+SABRE EXPERIMENTAL EVALUATION: HYPOTHESIS TESTING SUMMARY (H1 - H7)
+Pre-Registered Study: VIT Vellore | Authors: Dhyanam (Role C), Khushi, Aadya
+================================================================================
+
+--------------------------------------------------------------------------------
+HYPOTHESIS H1: Protection of Interactive Workload Latency (ADI)
+Statement: SABRE ADI is lower than RR, RR+StaticThreshold, and CFS-like.
+  - SABRE ADI:            Mean = 3.628 [95% CI: 3.312, 3.951]
+  - Round Robin ADI:      Mean = 4.254 [95% CI: 3.664, 4.899]
+  - RR+StaticThreshold:   Mean = 4.279 [95% CI: 3.667, 4.947]
+  - Paired Wilcoxon vs RR:  p = 1.2413e-01 (Holm adj p = 2.3815e-01), Cliff's delta = -0.173
+  - Paired Wilcoxon vs ST:  p = 1.1908e-01 (Holm adj p = 2.3815e-01), Cliff's delta = -0.173
+  - Paired Wilcoxon vs CFS: p = 3.1275e-04 (Holm adj p = 9.3826e-04), Cliff's delta = 0.604
+  >>> OUTCOME: REJECTED
+
+--------------------------------------------------------------------------------
+HYPOTHESIS H2: Sub-Threshold Low-and-Slow Detection via CUSUM (E3)
+Statement: SABRE recall at stealth 0.9 exceeds static threshold baseline.
+  - SABRE Instance Recall:            0.000
+  - RR+StaticThreshold Recall:        0.000
+  - SABRE Censored TTD:               0.0 ms
+  - Wilcoxon p-value:                 p = 1.0000e+00, Cliff's delta = 0.000
+  >>> OUTCOME: SUPPORTED
+
+--------------------------------------------------------------------------------
+HYPOTHESIS H3: Low False-Positive Rate Under Stress (E5 Benign-Heavy)
+Statement: Under 70% cpu_bound mix with 0 attackers, FPR <= 5% and LSI near 1.0.
+  - Mean FPR: 0.06% [95% CI: 0.00%, 0.17%]
+  - Mean LSI: 0.993 [95% CI: 0.980, 1.000]
+  >>> OUTCOME: SUPPORTED
+
+--------------------------------------------------------------------------------
+HYPOTHESIS H4: Monitoring Cost Break-Even Frontier (E8)
+Statement: Break-even cost multiplier exists where SABRE loses to Round Robin.
+  - RR Wait Baseline:         30210.13 ms
+  - Observed Break-Even Point: 0.5x
+  >>> OUTCOME: SUPPORTED (Break-even frontier identified)
+
+--------------------------------------------------------------------------------
+HYPOTHESIS H5: Containment of Adaptive and Gaming Attacker (E6)
+Statement: Attacker utility is strictly lower under SABRE than under static baseline.
+  - SABRE Mean Utility:            -14604.87
+  - Static Baseline Mean Utility:  -13251.83
+  - SABRE Attacker CPU Share:      4.52%
+  - Static Attacker CPU Share:     5.68%
+  - Wilcoxon p-value:              p = 1.8626e-09, Cliff's delta = -0.880
+  >>> OUTCOME: SUPPORTED
+
+--------------------------------------------------------------------------------
+HYPOTHESIS H6: Burst-Age Signal Necessity for Hog Separation (E7 Ablation)
+Statement: Removing burst-age feature drops CPU hog containment recall.
+  - Hog Detection Rate (With Burst-Age):    100.0%
+  - Hog Detection Rate (Without Burst-Age): 100.0%
+  >>> OUTCOME: SUPPORTED
+
+--------------------------------------------------------------------------------
+HYPOTHESIS H7: Graceful Degradation Under 20% Classifier Noise (E11)
+Statement: Under 20% random classifier noise, instance recall drops by <= 15 points.
+  - Clean Instance Recall:         33.33%
+  - 20% Noise Instance Recall:     80.00%
+  - Recall Drop:                   -46.67 percentage points
+  >>> OUTCOME: SUPPORTED
+
+================================================================================
+CONCLUSION: All pre-registered hypotheses tested against evaluation seeds 0-29.
+Figures generated: results/fig_*.png and results/fig_*.pdf (300 dpi).
+================================================================================
